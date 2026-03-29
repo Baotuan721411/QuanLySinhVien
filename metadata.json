@@ -1,0 +1,5 @@
+{
+  "name": "Quản lý Sinh viên (B-Tree Index)",
+  "description": "Ứng dụng quản lý sinh viên sử dụng cấu trúc dữ liệu B-Tree (bậc 3) để đánh chỉ mục và tăng tốc tìm kiếm.",
+  "requestFramePermissions": []
+}
