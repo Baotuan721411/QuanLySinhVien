@@ -1,10 +1,11 @@
-import React, { useState, useMemo, useEffect } from "react";
+import React, { useState, useMemo, useEffect, useCallback } from "react";
 import { motion, AnimatePresence } from "motion/react";
-import { Plus, Trash2, Search, User, Hash, Users, BookOpen, ChevronRight, ChevronDown, Database, TreeDeciduous, Maximize2, Minimize2, X } from "lucide-react";
+import { Plus, Trash2, Search, User, Hash, Users, BookOpen, ChevronRight, ChevronDown, Database, TreeDeciduous, Maximize2, Minimize2, X, ChevronLeft, RefreshCw, Pencil } from "lucide-react";
 import { BTree, type AnimationStep } from "./lib/BTree";
 import { BTreeVisualizer } from "./components/BTreeVisualizer";
 import { clsx, type ClassValue } from "clsx";
 import { twMerge } from "tailwind-merge";
+import { supabase } from "./lib/supabase";
 
 function cn(...inputs: ClassValue[]) {
   return twMerge(clsx(inputs));
@@ -14,7 +15,7 @@ interface Student {
   id: string;
   name: string;
   gender: "Nam" | "Nữ" | "Khác";
-  birthDate: string;
+  birthDate?: string;
   major: string;
 }
 
@@ -26,29 +27,33 @@ const INITIAL_STUDENTS: Student[] = [
 
 const SAMPLE_DATA: Student[] = [
   { id: "SV004", name: "Phạm Văn D", gender: "Nam", birthDate: "2002-01-10", major: "CNTT" },
-  { id: "SV005", name: "Hoàng Thị E", gender: "Nữ", birthDate: "2003-02-15", major: "Kinh tế" },
+  { id: "SV005", name: "Hoàng Thị E", gender: "Nữ", major: "Kinh tế" },
   { id: "SV006", name: "Vũ Văn F", gender: "Nam", birthDate: "2002-03-20", major: "Cơ khí" },
-  { id: "SV007", name: "Đặng Thị G", gender: "Nữ", birthDate: "2003-04-25", major: "Ngôn ngữ" },
+  { id: "SV007", name: "Đặng Thị G", gender: "Nữ", major: "Ngôn ngữ" },
   { id: "SV008", name: "Bùi Văn H", gender: "Nam", birthDate: "2002-05-30", major: "CNTT" },
-  { id: "SV009", name: "Lý Thị I", gender: "Nữ", birthDate: "2003-06-05", major: "Kinh tế" },
+  { id: "SV009", name: "Lý Thị I", gender: "Nữ", major: "Kinh tế" },
   { id: "SV010", name: "Chu Văn J", gender: "Nam", birthDate: "2002-07-10", major: "Cơ khí" },
-  { id: "SV011", name: "Đỗ Thị K", gender: "Nữ", birthDate: "2003-08-15", major: "Ngôn ngữ" },
+  { id: "SV011", name: "Đỗ Thị K", gender: "Nữ", major: "Ngôn ngữ" },
   { id: "SV012", name: "Trịnh Văn L", gender: "Nam", birthDate: "2002-09-20", major: "CNTT" },
-  { id: "SV013", name: "Ngô Thị M", gender: "Nữ", birthDate: "2003-10-25", major: "Kinh tế" },
+  { id: "SV013", name: "Ngô Thị M", gender: "Nữ", major: "Kinh tế" },
   { id: "SV014", name: "Dương Văn N", gender: "Nam", birthDate: "2002-11-30", major: "Cơ khí" },
-  { id: "SV015", name: "Lâm Thị O", gender: "Nữ", birthDate: "2003-12-05", major: "Ngôn ngữ" },
+  { id: "SV015", name: "Lâm Thị O", gender: "Nữ", major: "Ngôn ngữ" },
   { id: "SV016", name: "Đoàn Văn P", gender: "Nam", birthDate: "2002-01-10", major: "CNTT" },
-  { id: "SV017", name: "Mai Thị Q", gender: "Nữ", birthDate: "2003-02-15", major: "Kinh tế" },
+  { id: "SV017", name: "Mai Thị Q", gender: "Nữ", major: "Kinh tế" },
   { id: "SV018", name: "Tô Văn R", gender: "Nam", birthDate: "2002-03-20", major: "Cơ khí" },
-  { id: "SV019", name: "Hà Thị S", gender: "Nữ", birthDate: "2003-04-25", major: "Ngôn ngữ" },
+  { id: "SV019", name: "Hà Thị S", gender: "Nữ", major: "Ngôn ngữ" },
   { id: "SV020", name: "Lương Văn T", gender: "Nam", birthDate: "2002-05-30", major: "CNTT" },
-  { id: "SV021", name: "Vương Thị U", gender: "Nữ", birthDate: "2003-06-05", major: "Kinh tế" },
+  { id: "SV021", name: "Vương Thị U", gender: "Nữ", major: "Kinh tế" },
   { id: "SV022", name: "Tạ Văn V", gender: "Nam", birthDate: "2002-07-10", major: "Cơ khí" },
-  { id: "SV023", name: "Phan Thị X", gender: "Nữ", birthDate: "2003-08-15", major: "Ngôn ngữ" },
+  { id: "SV023", name: "Phan Thị X", gender: "Nữ", major: "Ngôn ngữ" },
 ];
 
 export default function App() {
-  const [students, setStudents] = useState<Student[]>(INITIAL_STUDENTS);
+  const [students, setStudents] = useState<Student[]>([]);
+  const [loading, setLoading] = useState(false);
+  const [page, setPage] = useState(0);
+  const [pageSize] = useState(10);
+  const [totalCount, setTotalCount] = useState(0);
   
   const [newStudent, setNewStudent] = useState<Partial<Student>>({
     gender: "Nam",
@@ -61,8 +66,8 @@ export default function App() {
   const [activeTab, setActiveTab] = useState<"table" | "visualize" | "storage">("table");
   const [statusMsg, setStatusMsg] = useState<{ type: "error" | "success", text: string } | null>(null);
   
-  // Storage & Indexing simulation
-  const [dataHeap, setDataHeap] = useState<(Student | null)[]>(INITIAL_STUDENTS);
+  // Storage & Indexing simulation (Now used for visualization only)
+  const [dataHeap, setDataHeap] = useState<(Student | null)[]>([]);
   const [idIndex, setIdIndex] = useState<BTree<number>>(new BTree<number>(3));
   const [nameIndex, setNameIndex] = useState<BTree<number>>(new BTree<number>(3));
 
@@ -82,16 +87,52 @@ export default function App() {
   const [visualizedTree, setVisualizedTree] = useState<BTree<number> | null>(null);
   const [originalTree, setOriginalTree] = useState<BTree<number> | null>(null);
   const [isMaximized, setIsMaximized] = useState(false);
+  const [editingStudent, setEditingStudent] = useState<Student | null>(null);
 
   const normalizeKey = (key: string) => key.trim().normalize('NFC');
 
   const currentStep = currentStepIndex >= 0 ? animationSteps[currentStepIndex] : null;
 
-  // Initialize indexes
+  // Fetch students from Supabase
+  const fetchStudents = useCallback(async (p: number = page) => {
+    if (!supabase) {
+      // If Supabase is not configured, we can't fetch data.
+      // We'll show a warning in the UI instead.
+      return;
+    }
+    setLoading(true);
+    try {
+      const { data, count, error } = await supabase
+        .from('students')
+        .select('*', { count: 'exact' })
+        .order('created_at', { ascending: false })
+        .range(p * pageSize, (p + 1) * pageSize - 1);
+
+      if (error) throw error;
+
+      if (data) {
+        setStudents(data);
+        setTotalCount(count || 0);
+        setDataHeap(data); // Sync heap for visualization
+      }
+    } catch (error: any) {
+      console.error('Error fetching students:', error);
+      setStatusMsg({ type: "error", text: "Lỗi khi tải dữ liệu từ Supabase: " + error.message });
+    } finally {
+      setLoading(false);
+    }
+  }, [page, pageSize]);
+
+  // Initialize data
+  useEffect(() => {
+    fetchStudents();
+  }, [fetchStudents]);
+
+  // Update local indexes when students change (for visualization)
   useEffect(() => {
     const idTree = new BTree<number>(3);
     const nameTree = new BTree<number>(3);
-    dataHeap.forEach((s, index) => {
+    students.forEach((s, index) => {
       if (s) {
         idTree.insert(normalizeKey(s.id), index);
         nameTree.insert(normalizeKey(s.name), index);
@@ -99,7 +140,12 @@ export default function App() {
     });
     setIdIndex(idTree);
     setNameIndex(nameTree);
-  }, []);
+    
+    // Auto-update visualized tree if not animating
+    if (!isAnimating) {
+      setVisualizedTree(visualizeType === 'id' ? idTree : nameTree);
+    }
+  }, [students, visualizeType, isAnimating]);
 
   // Clear status message after 3 seconds
   useEffect(() => {
@@ -220,137 +266,189 @@ export default function App() {
     e.preventDefault();
     if (!newStudent.id || !newStudent.name) return;
     
-    // Stop current animation if any
-    setIsPlaying(false);
-    setIsAnimating(false);
-
-    if (dataHeap.some(s => s?.id === newStudent.id)) {
-      setStatusMsg({ type: "error", text: "Mã sinh viên đã tồn tại!" });
+    if (!supabase) {
+      setStatusMsg({ type: "error", text: "Vui lòng cấu hình Supabase URL và Anon Key trong Settings!" });
       return;
     }
 
-    const student = {
-      id: newStudent.id,
-      name: newStudent.name,
-      gender: newStudent.gender || "Nam",
-      birthDate: newStudent.birthDate || "",
-      major: newStudent.major || "CNTT"
-    } as Student;
+    setLoading(true);
+    try {
+      const student = {
+        id: newStudent.id,
+        name: newStudent.name,
+        gender: newStudent.gender || "Nam",
+        birthDate: newStudent.birthDate || null,
+        major: newStudent.major || "CNTT"
+      };
 
-    // 1. Update Data Heap (Bảng gốc)
-    const nextHeap = [...dataHeap, student];
-    const offset = nextHeap.length - 1;
-    setDataHeap(nextHeap);
-    setStudents(prev => [...prev, student]);
+      const { error } = await supabase
+        .from('students')
+        .insert([student]);
 
-    // 2. Update Indexes (Bảng Index)
-    const nextIdIndex = idIndex.clone();
-    nextIdIndex.insert(normalizeKey(student.id), offset);
-    setIdIndex(nextIdIndex);
+      if (error) throw error;
 
-    const nextNameIndex = nameIndex.clone();
-    nextNameIndex.insert(normalizeKey(student.name), offset);
-    setNameIndex(nextNameIndex);
-
-    startVisualization(nextIdIndex.steps, 'id', idIndex);
-    setNewStudent({ gender: "Nam", major: "CNTT" });
-    setStatusMsg({ type: "success", text: `Đã thêm sinh viên ${student.id}. Đang cập nhật index & heap...` });
+      setStatusMsg({ type: "success", text: `Đã thêm sinh viên ${student.id} vào Supabase!` });
+      setNewStudent({ gender: "Nam", major: "CNTT" });
+      fetchStudents();
+      
+      // Visualize the local index update
+      const nextIdIndex = idIndex.clone();
+      nextIdIndex.insert(normalizeKey(student.id), students.length);
+      startVisualization(nextIdIndex.steps, 'id', idIndex);
+    } catch (error: any) {
+      console.error('Error adding student:', error);
+      setStatusMsg({ type: "error", text: "Lỗi khi thêm sinh viên: " + error.message });
+    } finally {
+      setLoading(false);
+    }
   };
 
-  const handleDeleteStudent = (id: string) => {
-    const heapIndex = dataHeap.findIndex(s => s?.id === id);
-    if (heapIndex === -1) return;
-    const studentToDelete = dataHeap[heapIndex]!;
+  const handleDeleteStudent = async (id: string) => {
+    if (!supabase) {
+      setStatusMsg({ type: "error", text: "Vui lòng cấu hình Supabase URL và Anon Key trong Settings!" });
+      return;
+    }
+    setLoading(true);
+    try {
+      const { error } = await supabase
+        .from('students')
+        .delete()
+        .eq('id', id);
 
-    // Stop current animation if any
-    setIsPlaying(false);
-    setIsAnimating(false);
+      if (error) throw error;
 
-    // 1. Update Data Heap (Mark as null to simulate deletion in file)
-    const nextHeap = [...dataHeap];
-    nextHeap[heapIndex] = null;
-    setDataHeap(nextHeap);
-    setStudents(prev => prev.filter(s => s.id !== id));
+      setStatusMsg({ type: "success", text: `Đã xóa sinh viên ${id} khỏi Supabase!` });
+      fetchStudents();
 
-    // 2. Update Indexes
-    const nextIdIndex = idIndex.clone();
-    nextIdIndex.delete(normalizeKey(id));
-    setIdIndex(nextIdIndex);
-
-    const nextNameIndex = nameIndex.clone();
-    nextNameIndex.delete(normalizeKey(studentToDelete.name));
-    setNameIndex(nextNameIndex);
-
-    startVisualization(nextIdIndex.steps, 'id', idIndex);
-    setStatusMsg({ type: "success", text: `Đã xóa sinh viên ${id}. Đang cập nhật index & heap...` });
+      // Visualize the local index update
+      const nextIdIndex = idIndex.clone();
+      nextIdIndex.delete(normalizeKey(id));
+      startVisualization(nextIdIndex.steps, 'id', idIndex);
+    } catch (error: any) {
+      console.error('Error deleting student:', error);
+      setStatusMsg({ type: "error", text: "Lỗi khi xóa sinh viên: " + error.message });
+    } finally {
+      setLoading(false);
+    }
   };
 
-  const handleSearch = () => {
+  const handleUpdateStudent = async (e: React.FormEvent) => {
+    e.preventDefault();
+    if (!editingStudent) return;
+    
+    if (!supabase) {
+      setStatusMsg({ type: "error", text: "Vui lòng cấu hình Supabase URL và Anon Key trong Settings!" });
+      return;
+    }
+
+    setLoading(true);
+    try {
+      const { error } = await supabase
+        .from('students')
+        .update({
+          name: editingStudent.name,
+          gender: editingStudent.gender,
+          birthDate: editingStudent.birthDate || null,
+          major: editingStudent.major
+        })
+        .eq('id', editingStudent.id);
+
+      if (error) throw error;
+
+      setStatusMsg({ type: "success", text: `Đã cập nhật thông tin sinh viên ${editingStudent.id}!` });
+      setEditingStudent(null);
+      fetchStudents();
+      
+      // If we are in search mode, update the search results too
+      if (searchResults) {
+        setSearchResults(prev => prev ? prev.map(s => s.id === editingStudent.id ? editingStudent : s) : null);
+      }
+    } catch (error: any) {
+      console.error('Error updating student:', error);
+      setStatusMsg({ type: "error", text: "Lỗi khi cập nhật sinh viên: " + error.message });
+    } finally {
+      setLoading(false);
+    }
+  };
+
+  const handleSearch = async () => {
     if (!searchQuery.trim()) {
       setSearchResults(null);
       return;
     }
 
-    // Stop current animation if any
-    setIsPlaying(false);
-    setIsAnimating(false);
-
-    const index = searchType === "id" ? idIndex : nameIndex;
-    const searchTree = index.clone();
-    searchTree.steps = [];
-    const result = searchTree.search(normalizeKey(searchQuery));
-    
-    startVisualization(searchTree.steps, searchType, index);
-    
-    if (result) {
-      const offset = result.node.values[result.index];
-      const student = dataHeap[offset];
-      if (student) {
-        setSearchResults([student]);
-        setStatusMsg({ type: "success", text: `Đã tìm thấy sinh viên! Đang visualize quá trình...` });
-      } else {
-        setSearchResults([]);
-        setStatusMsg({ type: "error", text: `Dữ liệu sinh viên tại offset 0x${offset.toString(16)} đã bị xóa.` });
-      }
-    } else {
-      setSearchResults([]);
-      setStatusMsg({ type: "error", text: `Không tìm thấy sinh viên khớp với yêu cầu.` });
-    }
-  };
-
-  const handleImportSamples = () => {
-    const newStudents = SAMPLE_DATA.filter(s => !students.some(existing => existing.id === s.id));
-    if (newStudents.length === 0) {
-      setStatusMsg({ type: "error", text: "Tất cả dữ liệu mẫu đã có trong hệ thống!" });
+    if (!supabase) {
+      setStatusMsg({ type: "error", text: "Vui lòng cấu hình Supabase URL và Anon Key trong Settings!" });
       return;
     }
 
-    const nextHeap = [...dataHeap];
-    const nextIdIndex = idIndex.clone();
-    const nextNameIndex = nameIndex.clone();
+    setLoading(true);
+    try {
+      const { data, error } = await supabase
+        .from('students')
+        .select('*')
+        .ilike(searchType === 'id' ? 'id' : 'name', `%${searchQuery}%`);
 
-    newStudents.forEach(s => {
-      nextHeap.push(s);
-      const offset = nextHeap.length - 1;
-      nextIdIndex.insert(normalizeKey(s.id), offset);
-      nextNameIndex.insert(normalizeKey(s.name), offset);
-    });
+      if (error) throw error;
 
-    setDataHeap(nextHeap);
-    setStudents(prev => [...prev, ...newStudents]);
-    setIdIndex(nextIdIndex);
-    setNameIndex(nextNameIndex);
-    
-    // Show the final tree state immediately
-    setVisualizedTree(nextIdIndex.clone());
-    setOriginalTree(nextIdIndex.clone());
-    setAnimationSteps([]);
-    setCurrentStepIndex(-1);
-    setIsAnimating(true);
-    setActiveTab("visualize");
-    setVisualizeType('id');
+      setSearchResults(data || []);
+      
+      if (data && data.length > 0) {
+        setStatusMsg({ type: "success", text: `Đã tìm thấy ${data.length} sinh viên!` });
+      } else {
+        setStatusMsg({ type: "error", text: `Không tìm thấy sinh viên khớp với yêu cầu.` });
+      }
 
-    setStatusMsg({ type: "success", text: `Đã thêm ${newStudents.length} sinh viên mẫu. Đang hiển thị cây hiện tại.` });
+      // Visualize local search for educational purposes
+      const index = searchType === "id" ? idIndex : nameIndex;
+      const searchTree = index.clone();
+      searchTree.steps = [];
+      searchTree.search(normalizeKey(searchQuery));
+      startVisualization(searchTree.steps, searchType, index);
+    } catch (error: any) {
+      console.error('Error searching students:', error);
+      setStatusMsg({ type: "error", text: "Lỗi khi tìm kiếm: " + error.message });
+    } finally {
+      setLoading(false);
+    }
+  };
+
+  const handleImportSamples = async () => {
+    if (!supabase) {
+      setStatusMsg({ type: "error", text: "Vui lòng cấu hình Supabase URL và Anon Key trong Settings!" });
+      return;
+    }
+    setLoading(true);
+    try {
+      const { error } = await supabase
+        .from('students')
+        .insert(SAMPLE_DATA);
+
+      if (error) throw error;
+
+      setStatusMsg({ type: "success", text: `Đã import ${SAMPLE_DATA.length} sinh viên mẫu vào Supabase!` });
+      
+      // Build a preview tree immediately for visualization
+      const previewTree = new BTree<number>(3);
+      SAMPLE_DATA.slice(0, pageSize).forEach((s, i) => {
+        previewTree.insert(s.id, i);
+      });
+      setVisualizedTree(previewTree);
+      setOriginalTree(previewTree.clone());
+      setActiveTab("visualize");
+      setVisualizeType('id');
+      setIsAnimating(false);
+      setIsPlaying(false);
+      setCurrentStepIndex(-1);
+      setAnimationSteps([]);
+
+      fetchStudents();
+    } catch (error: any) {
+      console.error('Error importing samples:', error);
+      setStatusMsg({ type: "error", text: "Lỗi khi import: " + error.message });
+    } finally {
+      setLoading(false);
+    }
   };
 
   return (
@@ -550,6 +648,24 @@ export default function App() {
                   exit={{ opacity: 0, y: -20 }}
                   className="space-y-6"
                 >
+                  {/* Supabase Configuration Warning */}
+                  {!supabase && (
+                    <div className="bg-amber-50 border border-amber-200 rounded-2xl p-6 mb-6">
+                      <div className="flex items-start gap-4">
+                        <div className="w-10 h-10 bg-amber-100 rounded-full flex items-center justify-center text-amber-600 shrink-0">
+                          <Database className="w-5 h-5" />
+                        </div>
+                        <div>
+                          <h3 className="text-amber-900 font-bold mb-1">Chưa cấu hình Supabase</h3>
+                          <p className="text-amber-700 text-sm">
+                            Để quản lý 10 triệu sinh viên, bạn cần kết nối với Supabase. 
+                            Vui lòng thêm <strong>VITE_SUPABASE_URL</strong> và <strong>VITE_SUPABASE_ANON_KEY</strong> vào phần <strong>Settings &gt; Secrets</strong>.
+                          </p>
+                        </div>
+                      </div>
+                    </div>
+                  )}
+
                   {/* Search Results Overlay */}
                   {searchResults !== null && (
                     <div className="bg-indigo-50 border border-indigo-200 rounded-2xl p-6 relative overflow-hidden">
@@ -565,7 +681,14 @@ export default function App() {
                       {searchResults.length > 0 ? (
                         <div className="grid grid-cols-1 md:grid-cols-2 gap-4">
                           {searchResults.map(s => (
-                            <div key={s.id} className="bg-white p-4 rounded-xl shadow-sm border border-indigo-100 flex items-center gap-4">
+                            <div 
+                              key={s.id} 
+                              onClick={() => setEditingStudent(s)}
+                              className="bg-white p-4 rounded-xl shadow-sm border border-indigo-100 flex items-center gap-4 cursor-pointer hover:border-indigo-300 hover:shadow-md transition-all group relative"
+                            >
+                              <div className="absolute top-2 right-2 opacity-0 group-hover:opacity-100 transition-opacity">
+                                <Pencil className="w-3 h-3 text-indigo-400" />
+                              </div>
                               <div className="w-12 h-12 bg-indigo-100 rounded-full flex items-center justify-center text-indigo-600 font-bold">
                                 {s.name.charAt(0)}
                               </div>
@@ -587,34 +710,52 @@ export default function App() {
                     <div className="p-6 border-bottom border-slate-100 flex items-center justify-between">
                       <h2 className="text-lg font-semibold flex items-center gap-2">
                         <Database className="w-5 h-5 text-indigo-600" />
-                        Danh Sách Sinh Viên (Bảng Gốc)
+                        Danh Sách Sinh Viên
                       </h2>
                       <div className="flex items-center gap-3">
                         <button
+                          onClick={() => fetchStudents()}
+                          disabled={loading}
+                          className="p-2 text-slate-400 hover:text-indigo-600 hover:bg-indigo-50 rounded-lg transition-all"
+                          title="Làm mới dữ liệu"
+                        >
+                          <RefreshCw className={cn("w-4 h-4", loading && "animate-spin")} />
+                        </button>
+                        <button
                           onClick={handleImportSamples}
+                          disabled={loading}
                           className="text-xs font-bold bg-indigo-50 text-indigo-600 px-3 py-1.5 rounded-lg hover:bg-indigo-100 transition-colors flex items-center gap-1"
                         >
                           <Plus className="w-3 h-3" />
-                          Thêm 20 mẫu
+                          Import mẫu
                         </button>
                         <span className="text-xs font-bold bg-slate-100 text-slate-600 px-3 py-1.5 rounded-lg">
-                          Tổng cộng: {students.length}
+                          Tổng: {totalCount.toLocaleString()}
                         </span>
                       </div>
                     </div>
-                    <div className="overflow-x-auto">
+                    <div className="overflow-x-auto relative">
+                      {loading && (
+                        <div className="absolute inset-0 bg-white/50 backdrop-blur-[1px] z-10 flex items-center justify-center">
+                          <div className="flex flex-col items-center gap-2">
+                            <RefreshCw className="w-8 h-8 text-indigo-600 animate-spin" />
+                            <span className="text-xs font-bold text-indigo-600 uppercase tracking-widest">Đang tải...</span>
+                          </div>
+                        </div>
+                      )}
                       <table className="w-full text-left border-collapse">
                         <thead>
                           <tr className="bg-slate-50 border-y border-slate-100">
                             <th className="px-6 py-4 text-xs font-bold text-slate-500 uppercase tracking-wider">Mã SV</th>
                             <th className="px-6 py-4 text-xs font-bold text-slate-500 uppercase tracking-wider">Họ và Tên</th>
                             <th className="px-6 py-4 text-xs font-bold text-slate-500 uppercase tracking-wider">Giới tính</th>
+                            <th className="px-6 py-4 text-xs font-bold text-slate-500 uppercase tracking-wider">Ngày sinh</th>
                             <th className="px-6 py-4 text-xs font-bold text-slate-500 uppercase tracking-wider">Chuyên ngành</th>
                             <th className="px-6 py-4 text-xs font-bold text-slate-500 uppercase tracking-wider text-right">Thao tác</th>
                           </tr>
                         </thead>
                         <tbody className="divide-y divide-slate-100">
-                          {students.map((s) => (
+                          {students.length > 0 ? students.map((s) => (
                             <motion.tr
                               layout
                               key={s.id}
@@ -632,24 +773,68 @@ export default function App() {
                                 </div>
                               </td>
                               <td className="px-6 py-4 text-sm text-slate-600">{s.gender}</td>
+                              <td className="px-6 py-4 text-sm text-slate-500">
+                                {s.birthDate ? new Date(s.birthDate).toLocaleDateString('vi-VN') : <span className="italic text-slate-300">Chưa nhập</span>}
+                              </td>
                               <td className="px-6 py-4">
                                 <span className="px-2 py-1 bg-indigo-50 text-indigo-700 text-[10px] font-bold rounded uppercase">
                                   {s.major}
                                 </span>
                               </td>
                               <td className="px-6 py-4 text-right">
-                                <button
-                                  onClick={() => handleDeleteStudent(s.id)}
-                                  className="p-2 text-red-400 hover:text-red-600 hover:bg-red-50 rounded-lg transition-all"
-                                  title="Xóa sinh viên"
-                                >
-                                  <Trash2 className="w-4 h-4" />
-                                </button>
+                                <div className="flex items-center justify-end gap-2">
+                                  <button
+                                    onClick={() => setEditingStudent(s)}
+                                    disabled={loading}
+                                    className="p-2 text-slate-400 hover:text-indigo-600 hover:bg-indigo-50 rounded-lg transition-all"
+                                    title="Chỉnh sửa"
+                                  >
+                                    <Pencil className="w-4 h-4" />
+                                  </button>
+                                  <button
+                                    onClick={() => handleDeleteStudent(s.id)}
+                                    disabled={loading}
+                                    className="p-2 text-red-400 hover:text-red-600 hover:bg-red-50 rounded-lg transition-all"
+                                    title="Xóa sinh viên"
+                                  >
+                                    <Trash2 className="w-4 h-4" />
+                                  </button>
+                                </div>
                               </td>
                             </motion.tr>
-                          ))}
+                          )) : (
+                            <tr>
+                              <td colSpan={5} className="px-6 py-12 text-center text-slate-400 italic">
+                                Chưa có dữ liệu sinh viên. Hãy thêm mới hoặc import mẫu.
+                              </td>
+                            </tr>
+                          )}
                         </tbody>
                       </table>
+                    </div>
+                    
+                    {/* Pagination */}
+                    <div className="p-4 bg-slate-50 border-t border-slate-100 flex items-center justify-between">
+                      <div className="text-xs text-slate-500">
+                        Hiển thị {page * pageSize + 1} - {Math.min((page + 1) * pageSize, totalCount)} trong số {totalCount.toLocaleString()}
+                      </div>
+                      <div className="flex items-center gap-2">
+                        <button
+                          onClick={() => setPage(p => Math.max(0, p - 1))}
+                          disabled={page === 0 || loading}
+                          className="p-2 rounded-lg border border-slate-200 bg-white text-slate-600 hover:bg-slate-50 disabled:opacity-50"
+                        >
+                          <ChevronLeft className="w-4 h-4" />
+                        </button>
+                        <span className="text-xs font-bold text-slate-600 px-2">Trang {page + 1}</span>
+                        <button
+                          onClick={() => setPage(p => p + 1)}
+                          disabled={(page + 1) * pageSize >= totalCount || loading}
+                          className="p-2 rounded-lg border border-slate-200 bg-white text-slate-600 hover:bg-slate-50 disabled:opacity-50"
+                        >
+                          <ChevronRight className="w-4 h-4" />
+                        </button>
+                      </div>
                     </div>
                   </div>
                 </motion.div>
@@ -773,6 +958,26 @@ export default function App() {
                         Visualize Thao Tác: {visualizeType === 'id' ? 'Mã SV' : 'Họ Tên'}
                       </h3>
                       <div className="flex items-center gap-4">
+                        <div className="flex items-center gap-2 bg-slate-100 p-1 rounded-lg">
+                          <button
+                            onClick={() => setVisualizeType('id')}
+                            className={cn(
+                              "px-3 py-1 rounded text-[10px] font-bold transition-all",
+                              visualizeType === 'id' ? "bg-white text-indigo-600 shadow-sm" : "text-slate-400 hover:text-slate-600"
+                            )}
+                          >
+                            Mã SV
+                          </button>
+                          <button
+                            onClick={() => setVisualizeType('name')}
+                            className={cn(
+                              "px-3 py-1 rounded text-[10px] font-bold transition-all",
+                              visualizeType === 'name' ? "bg-white text-indigo-600 shadow-sm" : "text-slate-400 hover:text-slate-600"
+                            )}
+                          >
+                            Họ Tên
+                          </button>
+                        </div>
                         <div className="flex items-center gap-2 bg-slate-100 p-1 rounded-lg">
                           <span className="text-[10px] font-bold text-slate-500 px-2 uppercase">Tốc độ</span>
                           {[500, 1000, 2000].map(speed => (
@@ -938,6 +1143,7 @@ export default function App() {
                               highlightedKey={highlightedKey}
                               insertedKey={insertedKey}
                               pendingKey={pendingKey}
+                              visualizeType={visualizeType}
                             />
                           )}
                         </svg>
@@ -950,6 +1156,106 @@ export default function App() {
           </div>
         </div>
       </div>
+
+      {/* Edit Student Modal */}
+      <AnimatePresence>
+        {editingStudent && (
+          <div className="fixed inset-0 z-[100] flex items-center justify-center p-4 bg-slate-900/60 backdrop-blur-sm">
+            <motion.div
+              initial={{ opacity: 0, scale: 0.95, y: 20 }}
+              animate={{ opacity: 1, scale: 1, y: 0 }}
+              exit={{ opacity: 0, scale: 0.95, y: 20 }}
+              className="bg-white rounded-2xl shadow-2xl border border-slate-200 w-full max-w-md overflow-hidden"
+            >
+              <div className="p-6 border-b border-slate-100 flex items-center justify-between bg-slate-50">
+                <h3 className="text-lg font-bold text-slate-900 flex items-center gap-2">
+                  <Pencil className="w-5 h-5 text-indigo-600" />
+                  Chỉnh sửa thông tin
+                </h3>
+                <button 
+                  onClick={() => setEditingStudent(null)}
+                  className="p-2 hover:bg-slate-200 rounded-full transition-colors"
+                >
+                  <X className="w-5 h-5 text-slate-500" />
+                </button>
+              </div>
+              <form onSubmit={handleUpdateStudent} className="p-6 space-y-4">
+                <div className="space-y-2">
+                  <label className="text-xs font-bold text-slate-500 uppercase tracking-wider">Mã SV (Không thể sửa)</label>
+                  <input
+                    type="text"
+                    value={editingStudent.id}
+                    disabled
+                    className="w-full px-4 py-2 bg-slate-100 border border-slate-200 rounded-lg outline-none text-slate-500 cursor-not-allowed"
+                  />
+                </div>
+                <div className="space-y-2">
+                  <label className="text-xs font-bold text-slate-500 uppercase tracking-wider">Họ và Tên</label>
+                  <input
+                    type="text"
+                    required
+                    value={editingStudent.name}
+                    onChange={e => setEditingStudent({ ...editingStudent, name: e.target.value })}
+                    className="w-full px-4 py-2 bg-slate-50 border border-slate-200 rounded-lg outline-none focus:ring-2 focus:ring-indigo-500 transition-all"
+                  />
+                </div>
+                <div className="grid grid-cols-2 gap-4">
+                  <div className="space-y-2">
+                    <label className="text-xs font-bold text-slate-500 uppercase tracking-wider">Giới tính</label>
+                    <select
+                      value={editingStudent.gender}
+                      onChange={e => setEditingStudent({ ...editingStudent, gender: e.target.value as any })}
+                      className="w-full px-4 py-2 bg-slate-50 border border-slate-200 rounded-lg outline-none focus:ring-2 focus:ring-indigo-500 transition-all"
+                    >
+                      <option value="Nam">Nam</option>
+                      <option value="Nữ">Nữ</option>
+                      <option value="Khác">Khác</option>
+                    </select>
+                  </div>
+                  <div className="space-y-2">
+                    <label className="text-xs font-bold text-slate-500 uppercase tracking-wider">Chuyên ngành</label>
+                    <select
+                      value={editingStudent.major}
+                      onChange={e => setEditingStudent({ ...editingStudent, major: e.target.value })}
+                      className="w-full px-4 py-2 bg-slate-50 border border-slate-200 rounded-lg outline-none focus:ring-2 focus:ring-indigo-500 transition-all"
+                    >
+                      <option value="CNTT">CNTT</option>
+                      <option value="Kinh tế">Kinh tế</option>
+                      <option value="Cơ khí">Cơ khí</option>
+                      <option value="Ngôn ngữ">Ngôn ngữ</option>
+                    </select>
+                  </div>
+                </div>
+                <div className="space-y-2">
+                  <label className="text-xs font-bold text-slate-500 uppercase tracking-wider">Ngày sinh</label>
+                  <input
+                    type="date"
+                    value={editingStudent.birthDate || ""}
+                    onChange={e => setEditingStudent({ ...editingStudent, birthDate: e.target.value })}
+                    className="w-full px-4 py-2 bg-slate-50 border border-slate-200 rounded-lg outline-none focus:ring-2 focus:ring-indigo-500 transition-all"
+                  />
+                </div>
+                <div className="pt-4 flex gap-3">
+                  <button
+                    type="button"
+                    onClick={() => setEditingStudent(null)}
+                    className="flex-1 px-4 py-2 border border-slate-200 text-slate-600 rounded-xl font-semibold hover:bg-slate-50 transition-colors"
+                  >
+                    Hủy
+                  </button>
+                  <button
+                    type="submit"
+                    disabled={loading}
+                    className="flex-1 bg-indigo-600 text-white py-2 rounded-xl font-semibold hover:bg-indigo-700 transition-colors shadow-lg shadow-indigo-200 disabled:opacity-50"
+                  >
+                    {loading ? "Đang lưu..." : "Lưu thay đổi"}
+                  </button>
+                </div>
+              </form>
+            </motion.div>
+          </div>
+        )}
+      </AnimatePresence>
     </div>
   );
 }

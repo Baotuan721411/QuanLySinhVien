@@ -1,5 +1,5 @@
 {
-  "name": "Quản lý Sinh viên (B-Tree Index)",
-  "description": "Ứng dụng quản lý sinh viên sử dụng cấu trúc dữ liệu B-Tree (bậc 3) để đánh chỉ mục và tăng tốc tìm kiếm.",
+  "name": "Quản lý 10 Triệu Sinh Viên (Supabase)",
+  "description": "Hệ thống quản lý sinh viên quy mô lớn tích hợp Supabase (PostgreSQL), hỗ trợ phân trang server-side và tìm kiếm hiệu năng cao cho 10 triệu bản ghi.",
   "requestFramePermissions": []
 }

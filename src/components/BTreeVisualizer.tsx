@@ -12,6 +12,7 @@ interface BTreeVisualizerProps<T> {
   highlightedKey: string | null;
   insertedKey: { nodeId: string; key: string } | null;
   pendingKey: string | null;
+  visualizeType?: 'id' | 'name';
 }
 
 export function BTreeVisualizer<T>({
@@ -24,9 +25,10 @@ export function BTreeVisualizer<T>({
   highlightedKey,
   insertedKey,
   pendingKey,
+  visualizeType = 'id',
 }: BTreeVisualizerProps<T>) {
   const nodeHeight = 24;
-  const keyWidth = 40;
+  const keyWidth = visualizeType === 'name' ? 120 : 50;
   const k = node.keys.length;
   const totalNodeWidth = k * keyWidth;
   const isHighlighted = highlightedNodeId === node.id;
@@ -202,6 +204,7 @@ export function BTreeVisualizer<T>({
               highlightedKey={highlightedKey}
               insertedKey={insertedKey}
               pendingKey={pendingKey}
+              visualizeType={visualizeType}
             />
           );
         })}
