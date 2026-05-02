@@ -5,7 +5,6 @@ import { BTree, type AnimationStep } from "./lib/BTree";
 import { BTreeVisualizer } from "./components/BTreeVisualizer";
 import { clsx, type ClassValue } from "clsx";
 import { twMerge } from "tailwind-merge";
-import { supabase } from "./lib/supabase";
 
 function cn(...inputs: ClassValue[]) {
   return twMerge(clsx(inputs));
@@ -49,12 +48,18 @@ const SAMPLE_DATA: Student[] = [
 ];
 
 export default function App() {
-  const [students, setStudents] = useState<Student[]>([]);
+  const [allStudents, setAllStudents] = useState<Student[]>([]);
   const [loading, setLoading] = useState(false);
   const [page, setPage] = useState(0);
   const [pageSize] = useState(10);
-  const [totalCount, setTotalCount] = useState(0);
   
+  const totalCount = allStudents.length;
+  // Derive the current page of students
+  const students = useMemo(() => {
+    const start = page * pageSize;
+    return allStudents.slice(start, start + pageSize);
+  }, [allStudents, page, pageSize]);
+
   const [newStudent, setNewStudent] = useState<Partial<Student>>({
     gender: "Nam",
     major: "CNTT"
@@ -93,45 +98,24 @@ export default function App() {
 
   const currentStep = currentStepIndex >= 0 ? animationSteps[currentStepIndex] : null;
 
-  // Fetch students from Supabase
+  // Remove Supabase fetch
   const fetchStudents = useCallback(async (p: number = page) => {
-    if (!supabase) {
-      // If Supabase is not configured, we can't fetch data.
-      // We'll show a warning in the UI instead.
-      return;
-    }
-    setLoading(true);
-    try {
-      const { data, count, error } = await supabase
-        .from('students')
-        .select('*', { count: 'exact' })
-        .order('created_at', { ascending: false })
-        .range(p * pageSize, (p + 1) * pageSize - 1);
+    // Left empty or can be removed, but kept for signature compatibility
+    // with any other calls. We just rely on local state now.
+  }, [page]);
 
-      if (error) throw error;
-
-      if (data) {
-        setStudents(data);
-        setTotalCount(count || 0);
-        setDataHeap(data); // Sync heap for visualization
-      }
-    } catch (error: any) {
-      console.error('Error fetching students:', error);
-      setStatusMsg({ type: "error", text: "Lỗi khi tải dữ liệu từ Supabase: " + error.message });
-    } finally {
-      setLoading(false);
-    }
-  }, [page, pageSize]);
-
-  // Initialize data
+  // Update local format
   useEffect(() => {
-    fetchStudents();
-  }, [fetchStudents]);
+    // setDataHeap maps for visualization to the actual total memory buffer
+    setDataHeap(students);
+  }, [students]);
 
   // Update local indexes when students change (for visualization)
   useEffect(() => {
     const idTree = new BTree<number>(3);
     const nameTree = new BTree<number>(3);
+    // Build tree purely from the current visible page or all students.
+    // We'll build indexing on the current page to keep visualizations manageable
     students.forEach((s, index) => {
       if (s) {
         idTree.insert(normalizeKey(s.id), index);
@@ -265,11 +249,6 @@ export default function App() {
   const handleAddStudent = async (e: React.FormEvent) => {
     e.preventDefault();
     if (!newStudent.id || !newStudent.name) return;
-    
-    if (!supabase) {
-      setStatusMsg({ type: "error", text: "Vui lòng cấu hình Supabase URL và Anon Key trong Settings!" });
-      return;
-    }
 
     setLoading(true);
     try {
@@ -278,22 +257,18 @@ export default function App() {
         name: newStudent.name,
         gender: newStudent.gender || "Nam",
         birthDate: newStudent.birthDate || null,
-        major: newStudent.major || "CNTT"
+        major: newStudent.major || "CNTT",
+        created_at: new Date().toISOString()
       };
 
-      const { error } = await supabase
-        .from('students')
-        .insert([student]);
+      setAllStudents(prev => [student as Student, ...prev]);
 
-      if (error) throw error;
-
-      setStatusMsg({ type: "success", text: `Đã thêm sinh viên ${student.id} vào Supabase!` });
+      setStatusMsg({ type: "success", text: `Đã thêm sinh viên ${student.id} vào bộ nhớ!` });
       setNewStudent({ gender: "Nam", major: "CNTT" });
-      fetchStudents();
       
       // Visualize the local index update
       const nextIdIndex = idIndex.clone();
-      nextIdIndex.insert(normalizeKey(student.id), students.length);
+      nextIdIndex.insert(normalizeKey(student.id), 0); // insert at top
       startVisualization(nextIdIndex.steps, 'id', idIndex);
     } catch (error: any) {
       console.error('Error adding student:', error);
@@ -304,21 +279,11 @@ export default function App() {
   };
 
   const handleDeleteStudent = async (id: string) => {
-    if (!supabase) {
-      setStatusMsg({ type: "error", text: "Vui lòng cấu hình Supabase URL và Anon Key trong Settings!" });
-      return;
-    }
     setLoading(true);
     try {
-      const { error } = await supabase
-        .from('students')
-        .delete()
-        .eq('id', id);
+      setAllStudents(prev => prev.filter(s => s.id !== id));
 
-      if (error) throw error;
-
-      setStatusMsg({ type: "success", text: `Đã xóa sinh viên ${id} khỏi Supabase!` });
-      fetchStudents();
+      setStatusMsg({ type: "success", text: `Đã xóa sinh viên ${id} khỏi bộ nhớ!` });
 
       // Visualize the local index update
       const nextIdIndex = idIndex.clone();
@@ -335,29 +300,13 @@ export default function App() {
   const handleUpdateStudent = async (e: React.FormEvent) => {
     e.preventDefault();
     if (!editingStudent) return;
-    
-    if (!supabase) {
-      setStatusMsg({ type: "error", text: "Vui lòng cấu hình Supabase URL và Anon Key trong Settings!" });
-      return;
-    }
 
     setLoading(true);
     try {
-      const { error } = await supabase
-        .from('students')
-        .update({
-          name: editingStudent.name,
-          gender: editingStudent.gender,
-          birthDate: editingStudent.birthDate || null,
-          major: editingStudent.major
-        })
-        .eq('id', editingStudent.id);
-
-      if (error) throw error;
+      setAllStudents(prev => prev.map(s => s.id === editingStudent.id ? { ...s, ...editingStudent } : s));
 
       setStatusMsg({ type: "success", text: `Đã cập nhật thông tin sinh viên ${editingStudent.id}!` });
       setEditingStudent(null);
-      fetchStudents();
       
       // If we are in search mode, update the search results too
       if (searchResults) {
@@ -377,19 +326,13 @@ export default function App() {
       return;
     }
 
-    if (!supabase) {
-      setStatusMsg({ type: "error", text: "Vui lòng cấu hình Supabase URL và Anon Key trong Settings!" });
-      return;
-    }
-
     setLoading(true);
     try {
-      const { data, error } = await supabase
-        .from('students')
-        .select('*')
-        .ilike(searchType === 'id' ? 'id' : 'name', `%${searchQuery}%`);
-
-      if (error) throw error;
+      const query = searchQuery.toLowerCase();
+      const data = allStudents.filter(s => {
+        if (searchType === 'id') return s.id.toLowerCase().includes(query);
+        return s.name.toLowerCase().includes(query);
+      });
 
       setSearchResults(data || []);
       
@@ -414,19 +357,11 @@ export default function App() {
   };
 
   const handleImportSamples = async () => {
-    if (!supabase) {
-      setStatusMsg({ type: "error", text: "Vui lòng cấu hình Supabase URL và Anon Key trong Settings!" });
-      return;
-    }
     setLoading(true);
     try {
-      const { error } = await supabase
-        .from('students')
-        .insert(SAMPLE_DATA);
+      setAllStudents(prev => [...SAMPLE_DATA, ...prev]);
 
-      if (error) throw error;
-
-      setStatusMsg({ type: "success", text: `Đã import ${SAMPLE_DATA.length} sinh viên mẫu vào Supabase!` });
+      setStatusMsg({ type: "success", text: `Đã import ${SAMPLE_DATA.length} sinh viên mẫu vào bộ nhớ!` });
       
       // Build a preview tree immediately for visualization
       const previewTree = new BTree<number>(3);
@@ -442,7 +377,6 @@ export default function App() {
       setCurrentStepIndex(-1);
       setAnimationSteps([]);
 
-      fetchStudents();
     } catch (error: any) {
       console.error('Error importing samples:', error);
       setStatusMsg({ type: "error", text: "Lỗi khi import: " + error.message });
@@ -648,24 +582,6 @@ export default function App() {
                   exit={{ opacity: 0, y: -20 }}
                   className="space-y-6"
                 >
-                  {/* Supabase Configuration Warning */}
-                  {!supabase && (
-                    <div className="bg-amber-50 border border-amber-200 rounded-2xl p-6 mb-6">
-                      <div className="flex items-start gap-4">
-                        <div className="w-10 h-10 bg-amber-100 rounded-full flex items-center justify-center text-amber-600 shrink-0">
-                          <Database className="w-5 h-5" />
-                        </div>
-                        <div>
-                          <h3 className="text-amber-900 font-bold mb-1">Chưa cấu hình Supabase</h3>
-                          <p className="text-amber-700 text-sm">
-                            Để quản lý 10 triệu sinh viên, bạn cần kết nối với Supabase. 
-                            Vui lòng thêm <strong>VITE_SUPABASE_URL</strong> và <strong>VITE_SUPABASE_ANON_KEY</strong> vào phần <strong>Settings &gt; Secrets</strong>.
-                          </p>
-                        </div>
-                      </div>
-                    </div>
-                  )}
-
                   {/* Search Results Overlay */}
                   {searchResults !== null && (
                     <div className="bg-indigo-50 border border-indigo-200 rounded-2xl p-6 relative overflow-hidden">
@@ -713,14 +629,6 @@ export default function App() {
                         Danh Sách Sinh Viên
                       </h2>
                       <div className="flex items-center gap-3">
-                        <button
-                          onClick={() => fetchStudents()}
-                          disabled={loading}
-                          className="p-2 text-slate-400 hover:text-indigo-600 hover:bg-indigo-50 rounded-lg transition-all"
-                          title="Làm mới dữ liệu"
-                        >
-                          <RefreshCw className={cn("w-4 h-4", loading && "animate-spin")} />
-                        </button>
                         <button
                           onClick={handleImportSamples}
                           disabled={loading}
